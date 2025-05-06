@@ -1,0 +1,60 @@
+volumes:
+  app_data:
+  mongodb_data:
+  ts_state:
+
+services:
+
+  app:
+    hostname: app
+    image: lscr.io/linuxserver/unifi-network-application:latest
+    restart: unless-stopped
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - MONGO_HOST=mongodb
+      - MONGO_PORT=27017
+      - MONGO_DBNAME=unifi
+      - MONGO_USER=unifi
+      - MONGO_PASS=${USER_PASS}
+    ports:
+      - 8443:8443          # web admin UI
+      - 8080:8080          # device communication
+      - 3478:3478/udp      # STUN
+      - 10001:10001/udp    # AP discovery
+      - 1900:1900/udp      # make controller discoverable on L2 network
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - app_data:/config
+      - ./backup:/config/data/backup
+    depends_on:
+      - mongodb
+
+  mongodb:
+    hostname: mongodb
+    image: mongo:4.4
+    restart: unless-stopped
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - MONGO_INITDB_ROOT_USERNAME=root
+      - MONGO_INITDB_ROOT_PASSWORD=${ROOT_PASS}
+      - MONGO_USER=unifi
+      - MONGO_PASS=${USER_PASS}
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - mongodb_data:/data/db
+      - ./config/init-mongo.sh:/docker-entrypoint-initdb.d/init-mongo.sh:ro
+
+  tailscale:
+    image: tailscale/tailscale:latest
+    hostname: unifi
+    environment:
+      - TS_EXTRA_ARGS=--advertise-tags=tag:container
+      - TS_STATE_DIR=/var/lib/tailscale
+      - TS_SOCKET=/tmp/tailscaled.sock
+      - TS_SERVE_CONFIG=/config/ts-serve.json
+    volumes:
+      - ts_state:/var/lib/tailscale
+      - ./config/tailscale:/config
+    restart: unless-stopped
