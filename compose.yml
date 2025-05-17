@@ -23,10 +23,10 @@ services:
       - 3478:3478/udp      # STUN
       - 10001:10001/udp    # AP discovery
       - 1900:1900/udp      # make controller discoverable on L2 network
-      - 8843:8843 #optional
-      - 8880:8880 #optional
-      - 6789:6789 #optional
-      - 5514:5514/udp #optional
+      - 8843:8843          # guest portal HTTPS redirect port
+      - 8880:8880          # guest portal HTTP redirect port
+      - 6789:6789          # mobile throughput test
+      - 5514:5514/udp      # remote syslog
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - app_data:/config
