@@ -16,7 +16,5 @@ tags
 \.netrwhist
 
 ## Application
-config/caddy/Caddyfile
-tmp/*
 backup/*
 .env

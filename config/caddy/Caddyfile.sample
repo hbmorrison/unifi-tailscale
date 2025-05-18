@@ -1,9 +1,0 @@
-unifi.tailnet-name.ts.net {
-	reverse_proxy * https://app:8443 {
-		header_up Host {host}
-		header_up X-Real-IP {remote}
-		transport http {
-			tls_insecure_skip_verify
-		}
-	}
-}

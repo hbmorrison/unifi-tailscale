@@ -1,43 +1,45 @@
 volumes:
   app_data:
-  mongodb_data:
-  ts_state:
+  mongo_data:
+  tailscale_state:
 
 services:
 
   app:
-    hostname: app
     image: lscr.io/linuxserver/unifi-network-application:latest
-    restart: unless-stopped
+    network_mode: service:tailscale
     environment:
       - PUID=${PUID}
       - PGID=${PGID}
-      - MONGO_HOST=mongodb
+      - MONGO_HOST=localhost
       - MONGO_PORT=27017
       - MONGO_DBNAME=unifi
       - MONGO_USER=unifi
       - MONGO_PASS=${USER_PASS}
-    ports:
-      - 8443:8443          # web admin UI
-      - 8080:8080          # device communication
-      - 3478:3478/udp      # STUN
-      - 10001:10001/udp    # AP discovery
-      - 1900:1900/udp      # make controller discoverable on L2 network
-      - 8843:8843          # guest portal HTTPS redirect port
-      - 8880:8880          # guest portal HTTP redirect port
-      - 6789:6789          # mobile throughput test
-      - 5514:5514/udp      # remote syslog
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - app_data:/config
       - ./backup:/config/data/backup
-    depends_on:
-      - mongodb
-
-  mongodb:
-    hostname: mongodb
-    image: mongo:4.4
+    healthcheck:
+      test: curl --fail --insecure https://localhost:8443 || exit 1
+      start_period: 60s
+      timeout: 10s
+      interval: 20s
+      retries: 5
+    labels:
+      - deunhealth.restart.on.unhealthy=true
     restart: unless-stopped
+    depends_on:
+      mongo:
+        condition: service_healthy
+        restart: true
+      tailscale:
+        condition: service_healthy
+        restart: true
+
+  mongo:
+    image: mongo:4.4
+    network_mode: service:tailscale
     environment:
       - PUID=${PUID}
       - PGID=${PGID}
@@ -47,17 +49,59 @@ services:
       - MONGO_PASS=${USER_PASS}
     volumes:
       - /etc/localtime:/etc/localtime:ro
-      - mongodb_data:/data/db
-      - ./config/init-mongo.sh:/docker-entrypoint-initdb.d/init-mongo.sh:ro
+      - mongo_data:/data/db
+      - ./init-mongo.sh:/docker-entrypoint-initdb.d/init-mongo.sh:ro
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongo mongodb://unifi:${USER_PASS}@localhost:27017/?authSource=unifi --quiet
+      start_period: 20s
+      timeout: 10s
+      interval: 20s
+      retries: 5
+    labels:
+      - deunhealth.restart.on.unhealthy=true
+    restart: unless-stopped
+    depends_on:
+      tailscale:
+        condition: service_healthy
+        restart: true
 
   tailscale:
     image: tailscale/tailscale:latest
-    hostname: unifi
+    hostname: ${TAILSCALE_HOSTNAME}
+    ports:
+      - ${FABRIC_IP_ADDR}:3478:3478/udp      # STUN
+      - ${FABRIC_IP_ADDR}:10001:10001/udp    # AP discovery
+      - ${FABRIC_IP_ADDR}:8080:8080          # device communication
+      - ${FABRIC_IP_ADDR}:1900:1900/udp      # make controller discoverable on L2 network option
+      - ${FABRIC_IP_ADDR}:8843:8843          # guest portal HTTPS redirect port
+      - ${FABRIC_IP_ADDR}:8880:8880          # guest portal HTTP redirect port
+      - ${FABRIC_IP_ADDR}:6789:6789          # mobile throughput test
+      - ${FABRIC_IP_ADDR}:5514:5514/udp      # remote syslog
     environment:
       - TS_EXTRA_ARGS=--advertise-tags=tag:container
+      - TS_TAILSCALED_EXTRA_ARGS=--no-logs-no-support
       - TS_STATE_DIR=/var/lib/tailscale
       - TS_SERVE_CONFIG=/config/ts-serve.json
+      - TS_ENABLE_HEALTH_CHECK=true
     volumes:
-      - ts_state:/var/lib/tailscale
-      - ./config/tailscale:/config
-    restart: unless-stopped
+      - tailscale_state:/var/lib/tailscale
+      - ./ts-serve.json:/config/ts-serve.json
+    healthcheck:
+      test: wget -q --tries=1 --spider http://127.0.0.1:9002/healthz || exit 1
+      interval: 20s
+      retries: 2
+      start_period: 20s
+      timeout: 10s
+    labels:
+      - deunhealth.restart.on.unhealthy=true
+    restart: on-failure
+
+  deunhealth:
+    image: qmcgaw/deunhealth
+    environment:
+      - LOG_LEVEL=info
+      - HEALTH_SERVER_ADDRESS=127.0.0.1:9999
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    network_mode: none
+    restart: always
